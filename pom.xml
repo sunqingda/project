@@ -9,7 +9,7 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.sqd</groupId>
-    <artifactId>demo</artifactId>
+    <artifactId>arthas-test-project</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <name>arthas-test-project</name>
     <description>Demo project for arthas</description>

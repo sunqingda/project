@@ -1,4 +1,4 @@
-package com.sqd.demo.dao;
+package com.sqd.demo.Entity;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

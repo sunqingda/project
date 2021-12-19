@@ -2,7 +2,7 @@ package com.sqd.demo.service;
 
 import com.sqd.demo.common.EntityQuery;
 import com.sqd.demo.common.Result;
-import com.sqd.demo.dao.Entity;
+import com.sqd.demo.Entity.Entity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -30,7 +30,7 @@ public class TestServiceImpl implements TestService {
     }
 
     @Override
-    public Result<List<Entity>> queryEntityList(EntityQuery entityQuery) {
+    public Result<List<Entity>> queryEntityById(EntityQuery entityQuery) {
         if (!CollectionUtils.isEmpty(entityList)) {
             List<Entity> entityResult = entityList.stream().filter(x -> x.getId() == entityQuery.getId()).collect(Collectors.toList());
             if (!CollectionUtils.isEmpty(entityResult)) {
@@ -41,6 +41,17 @@ public class TestServiceImpl implements TestService {
         }
         log.error("查询失败，entity 列表为空，查询条件：{}", entityQuery);
         return Result.fail("ENTITY_LIST_IS_NULL", "entity 列表为空");
+    }
+
+    /**
+     * @description 死循环提高 CPU 使用率
+     */
+    private static void cpuHigh(){
+        new Thread(() -> {
+            while (true) {
+                log.info("线程{}循环", Thread.currentThread().getName());
+            }
+        }, Thread.currentThread().getName()).start();
     }
 
 }
