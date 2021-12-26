@@ -4,37 +4,22 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sqd.annotation.MultiRequestBody;
-import com.sqd.query.Param;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.json.JSONArray;
+import org.assertj.core.util.Sets;
 import org.objectweb.asm.*;
 import org.springframework.boot.json.JacksonJsonParser;
 import org.springframework.core.MethodParameter;
 import org.springframework.util.ObjectUtils;
 import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
-import org.springframework.web.context.request.RequestAttributes;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
-import sun.nio.ch.IOUtil;
-import sun.reflect.MethodAccessor;
 
-import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.lang.annotation.Native;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.Map;
-
-import static org.objectweb.asm.Opcodes.*;
-import static org.objectweb.asm.Opcodes.ATHROW;
+import java.util.*;
 
 /**
  * MultiRequestBody 解析器
@@ -54,7 +39,19 @@ import static org.objectweb.asm.Opcodes.ATHROW;
  */
 public class MultiRequestBodyResolver implements HandlerMethodArgumentResolver {
 
+    private static final Set<Class> classSet = Sets.newHashSet();
     private static final String JSON_REQUEST_BODY = "JSON_REQUEST_BODY";
+
+    static {
+        classSet.add(Integer.class);
+        classSet.add(Long.class);
+        classSet.add(Short.class);
+        classSet.add(Float.class);
+        classSet.add(Double.class);
+        classSet.add(Boolean.class);
+        classSet.add(Byte.class);
+        classSet.add(Character.class);
+    }
 
     /**
      * @param parameter 方法参数
@@ -80,61 +77,84 @@ public class MultiRequestBodyResolver implements HandlerMethodArgumentResolver {
 
         Object result;
         String requestBody = getRequestBody(webRequest);
-
-//        ObjectMapper objectMapper = new ObjectMapper();
-//        objectMapper.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
-//        JsonNode jsonNode = objectMapper.readTree(requestBody);
-//        if (null == jsonNode) {
-//            return null;
-//        }
-
-        JacksonJsonParser jacksonJsonParser = new JacksonJsonParser();
-        Map<String, Object> stringObjectMap = jacksonJsonParser.parseMap(requestBody);
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
+        JsonNode jsonNode = objectMapper.readTree(requestBody);
+        if (null == jsonNode) {
+            return null;
+        }
+//        JacksonJsonParser jacksonJsonParser = new JacksonJsonParser();
+//        Map<String, Object> stringObjectMap = jacksonJsonParser.parseMap(requestBody);
 
         MultiRequestBody parameterAnnotation = parameter.getParameterAnnotation(MultiRequestBody.class);
         String key = parameterAnnotation.value();
         Object value;
         if (StringUtils.isNotBlank(key)) {
-            value = stringObjectMap.get(key);
+            value = jsonNode.get(key);
             if (ObjectUtils.isEmpty(value) && parameterAnnotation.required()) {
                 throw new IllegalAccessException(String.format("required param %s is not present", key));
             }
         } else {
             key = parameter.getParameterName();
-            value = stringObjectMap.get(key);
+            value = jsonNode.get(key);
         }
 
         Class<?> paramType = parameter.getParameterType();
-
+        Type type = Type.getType(paramType);
         if (null != value) {
-            if (paramType.isPrimitive()) {
 
+            // 基本数据类型
+            if (paramType.isPrimitive()) {
+                switch (type.getSort()) {
+                    case Type.BOOLEAN:
+                        return Boolean.valueOf(value.toString());
+                    case Type.BYTE:
+                        return Byte.valueOf(value.toString());
+                    case Type.CHAR:
+                        return value.toString().charAt(0);
+                    case Type.SHORT:
+                        return Short.valueOf(value.toString());
+                    case Type.INT:
+                        return Integer.valueOf(value.toString());
+                    case Type.FLOAT:
+                        return Float.valueOf(value.toString());
+                    case Type.LONG:
+                        return Long.valueOf(value.toString());
+                    case Type.DOUBLE:
+                        return Double.valueOf(value.toString());
+                    case Type.ARRAY:
+                        return value;
+                }
             }
-            Type type = Type.getType(paramType);
-            switch (type.getSort()) {
-                case Type.BOOLEAN:
-                    break;
-                case Type.BYTE:
-                    break;
-                case Type.CHAR:
-                    break;
-                case Type.SHORT:
-                    break;
-                case Type.INT:
-                    break;
-                case Type.FLOAT:
-                    break;
-                case Type.LONG:
-                    break;
-                case Type.DOUBLE:
-                    break;
-                case Type.ARRAY:
-                    break;
-                case Type.OBJECT:
-                    break;
-            }
+
+            System.out.println(paramType.getName());
+            System.out.println(paramType.getTypeName());
+            // 基本数据类型包装类
+            Number number;
+            if (isBasicDataTypes(paramType)) {
+                switch (paramType.getTypeName()) {
+                    case "java.lang.Boolean":
+                        return Boolean.valueOf(value.toString());
+                    case "java.lang.Byte":
+                        return Byte.valueOf(value.toString());
+                    case "java.lang.Character":
+                        return value.toString().charAt(0);
+                    case "java.lang.Short":
+                        return Short.valueOf(value.toString());
+                    case "java.lang.Integer":
+                        return Integer.valueOf(value.toString());
+                    case "java.lang.Float":
+                        return Float.valueOf(value.toString());
+                    case "java.lang.Long":
+                        return Long.valueOf(value.toString());
+                    case "java.lang.Double":
+                        return Double.valueOf(value.toString());
+                }
+            }/* else if (paramType == String.class) {
+
+            }*/
         }
-        return value;
+        return Class.forName(paramType.getName()).newInstance();
     }
 
     /**
@@ -153,19 +173,15 @@ public class MultiRequestBodyResolver implements HandlerMethodArgumentResolver {
         }
         return jsonBody;
     }
+
+    /**
+     * 判断是否为基本数据类型包装类
+     */
+    private boolean isBasicDataTypes(Class clazz) {
+        return classSet.contains(clazz);
+    }
+
 //    {
-//        ArrayList<Method> methods = new ArrayList<Method>();
-//        boolean isInterface = type.isInterface();
-//        if (!isInterface) {
-//            Class nextClass = type;
-//            while (nextClass != Object.class) {
-//                addDeclaredMethodsToList(nextClass, methods);
-//                nextClass = nextClass.getSuperclass();
-//            }
-//        } else {
-//            recursiveAddInterfaceMethodsToList(type, methods);
-//        }
-//
 //        int n = methods.size();
 //        String[] methodNames = new String[n];
 //        Class[][] parameterTypes = new Class[n][];
@@ -252,35 +268,6 @@ public class MultiRequestBodyResolver implements HandlerMethodArgumentResolver {
 //                                invoke = INVOKEVIRTUAL;
 //                            mv.visitMethodInsn(invoke, classNameInternal, methodNames[i], buffer.toString());
 //
-//                            switch (Type.getType(returnType).getSort()) {
-//                                case Type.VOID:
-//                                    mv.visitInsn(ACONST_NULL);
-//                                    break;
-//                                case Type.BOOLEAN:
-//                                    mv.visitMethodInsn(INVOKESTATIC, "java/lang/Boolean", "valueOf", "(Z)Ljava/lang/Boolean;");
-//                                    break;
-//                                case Type.BYTE:
-//                                    mv.visitMethodInsn(INVOKESTATIC, "java/lang/Byte", "valueOf", "(B)Ljava/lang/Byte;");
-//                                    break;
-//                                case Type.CHAR:
-//                                    mv.visitMethodInsn(INVOKESTATIC, "java/lang/Character", "valueOf", "(C)Ljava/lang/Character;");
-//                                    break;
-//                                case Type.SHORT:
-//                                    mv.visitMethodInsn(INVOKESTATIC, "java/lang/Short", "valueOf", "(S)Ljava/lang/Short;");
-//                                    break;
-//                                case Type.INT:
-//                                    mv.visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;");
-//                                    break;
-//                                case Type.FLOAT:
-//                                    mv.visitMethodInsn(INVOKESTATIC, "java/lang/Float", "valueOf", "(F)Ljava/lang/Float;");
-//                                    break;
-//                                case Type.LONG:
-//                                    mv.visitMethodInsn(INVOKESTATIC, "java/lang/Long", "valueOf", "(J)Ljava/lang/Long;");
-//                                    break;
-//                                case Type.DOUBLE:
-//                                    mv.visitMethodInsn(INVOKESTATIC, "java/lang/Double", "valueOf", "(D)Ljava/lang/Double;");
-//                                    break;
-//                            }
 //
 //                            mv.visitInsn(ARETURN);
 //                        }
