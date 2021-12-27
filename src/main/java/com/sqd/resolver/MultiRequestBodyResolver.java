@@ -81,7 +81,7 @@ public class MultiRequestBodyResolver implements HandlerMethodArgumentResolver {
             Object value;
             if (StringUtils.isNotBlank(key)) {
                 value = jsonNode.get(key);
-                Assert.isTrue(!(parameterAnnotation.required() && Objects.isNull(value)),
+                Assert.isTrue(parameterAnnotation.required() && Objects.nonNull(value),
                         String.format("required param %s is not present", key));
             } else {
                 key = parameter.getParameterName();
@@ -144,11 +144,11 @@ public class MultiRequestBodyResolver implements HandlerMethodArgumentResolver {
 
             // 未解析到 value，将整个 JSON 串作为当前参数类型
             // 参数为基本数据类型，且为必传参数
-            Assert.isTrue(!(isBasicDataTypes(paramType) && parameterAnnotation.required()),
+            Assert.isTrue(isBasicDataTypes(paramType) && !parameterAnnotation.required(),
                     String.format("required param %s is not present", key));
 
             // 非基本数据类型，不允许解析所有字段，且为必传参数
-            Assert.isTrue(!(!parameterAnnotation.parseAllFields() && parameterAnnotation.required()),
+            Assert.isTrue(!parameterAnnotation.parseAllFields() && !parameterAnnotation.required(),
                     String.format("required param %s is not present", key));
 
             result = objectMapper.readValue(requestBody, paramType);
@@ -156,7 +156,7 @@ public class MultiRequestBodyResolver implements HandlerMethodArgumentResolver {
                 Field[] declaredFields = paramType.getDeclaredFields();
                 for (Field field : declaredFields) {
                     field.setAccessible(true);
-                    Assert.isTrue(Objects.isNull(field.get(result)), String.format("required param %s is not present", key));
+                    Assert.notNull(field.get(result), String.format("required param %s is not present", key));
                 }
             }
         } catch (Exception e) {
