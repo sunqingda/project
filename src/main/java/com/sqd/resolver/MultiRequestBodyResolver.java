@@ -8,9 +8,8 @@ import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.assertj.core.util.Sets;
 import org.objectweb.asm.*;
-import org.springframework.boot.json.JacksonJsonParser;
 import org.springframework.core.MethodParameter;
-import org.springframework.util.ObjectUtils;
+import org.springframework.util.Assert;
 import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
@@ -19,6 +18,7 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 import javax.servlet.http.HttpServletRequest;
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.*;
 
 /**
@@ -54,7 +54,6 @@ public class MultiRequestBodyResolver implements HandlerMethodArgumentResolver {
     }
 
     /**
-     * @param parameter 方法参数
      * @description 支持的方法参数类型
      * @see MultiRequestBody
      */
@@ -64,97 +63,107 @@ public class MultiRequestBodyResolver implements HandlerMethodArgumentResolver {
     }
 
     /**
-     * @param parameter
-     * @param mavContainer
-     * @param webRequest
-     * @param binderFactory
-     * @return
-     * @throws Exception
      * @description 参数解析
      */
     @Override
     public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer, NativeWebRequest webRequest, WebDataBinderFactory binderFactory) throws Exception {
 
-        Object result;
-        String requestBody = getRequestBody(webRequest);
-        ObjectMapper objectMapper = new ObjectMapper();
-        objectMapper.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
-        JsonNode jsonNode = objectMapper.readTree(requestBody);
-        if (null == jsonNode) {
+        Object result = null;
+        try {
+            String requestBody = getRequestBody(webRequest);
+            ObjectMapper objectMapper = new ObjectMapper();
+            objectMapper.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
+            JsonNode jsonNode = objectMapper.readTree(requestBody);
+            Assert.notNull(jsonNode, String.format("参数 %s 解析失败", requestBody));
+
+            MultiRequestBody parameterAnnotation = parameter.getParameterAnnotation(MultiRequestBody.class);
+            String key = parameterAnnotation.value();
+            Object value;
+            if (StringUtils.isNotBlank(key)) {
+                value = jsonNode.get(key);
+                Assert.isTrue(!(parameterAnnotation.required() && Objects.isNull(value)),
+                        String.format("required param %s is not present", key));
+            } else {
+                key = parameter.getParameterName();
+                value = jsonNode.get(key);
+            }
+
+            Class<?> paramType = parameter.getParameterType();
+            Type type = Type.getType(paramType);
+            if (Objects.nonNull(value)) {
+                // 基本数据类型
+                if (paramType.isPrimitive()) {
+                    switch (type.getSort()) {
+                        case Type.BOOLEAN:
+                            return Boolean.valueOf(value.toString());
+                        case Type.BYTE:
+                            return Byte.valueOf(value.toString());
+                        case Type.CHAR:
+                            return value.toString().charAt(0);
+                        case Type.SHORT:
+                            return Short.valueOf(value.toString());
+                        case Type.INT:
+                            return Integer.valueOf(value.toString());
+                        case Type.FLOAT:
+                            return Float.valueOf(value.toString());
+                        case Type.LONG:
+                            return Long.valueOf(value.toString());
+                        case Type.DOUBLE:
+                            return Double.valueOf(value.toString());
+                    }
+                }
+                // 基本数据类型包装类
+                Number number;
+                if (isBasicDataTypes(paramType)) {
+                    switch (paramType.getTypeName()) {
+                        case "java.lang.Boolean":
+                            return Boolean.valueOf(value.toString());
+                        case "java.lang.Byte":
+                            return Byte.valueOf(value.toString());
+                        case "java.lang.Character":
+                            return value.toString().charAt(0);
+                        case "java.lang.Short":
+                            return Short.valueOf(value.toString());
+                        case "java.lang.Integer":
+                            return Integer.valueOf(value.toString());
+                        case "java.lang.Float":
+                            return Float.valueOf(value.toString());
+                        case "java.lang.Long":
+                            return Long.valueOf(value.toString());
+                        case "java.lang.Double":
+                            return Double.valueOf(value.toString());
+                    }
+                }
+                // 字符串
+                if (paramType == String.class) {
+                    return value.toString();
+                }
+                // 其它他杂对象
+                return objectMapper.readValue(value.toString(), paramType);
+            }
+
+            // 未解析到 value，将整个 JSON 串作为当前参数类型
+            // 参数为基本数据类型，且为必传参数
+            Assert.isTrue(!(isBasicDataTypes(paramType) && parameterAnnotation.required()),
+                    String.format("required param %s is not present", key));
+
+            // 非基本数据类型，不允许解析所有字段，且为必传参数
+            Assert.isTrue(!(!parameterAnnotation.parseAllFields() && parameterAnnotation.required()),
+                    String.format("required param %s is not present", key));
+
+            result = objectMapper.readValue(requestBody, paramType);
+            if (parameterAnnotation.required()) {
+                Field[] declaredFields = paramType.getDeclaredFields();
+                for (Field field : declaredFields) {
+                    field.setAccessible(true);
+                    Assert.isTrue(Objects.isNull(field.get(result)), String.format("required param %s is not present", key));
+                }
+            }
+        } catch (Exception e) {
             return null;
+
         }
-//        JacksonJsonParser jacksonJsonParser = new JacksonJsonParser();
-//        Map<String, Object> stringObjectMap = jacksonJsonParser.parseMap(requestBody);
-
-        MultiRequestBody parameterAnnotation = parameter.getParameterAnnotation(MultiRequestBody.class);
-        String key = parameterAnnotation.value();
-        Object value;
-        if (StringUtils.isNotBlank(key)) {
-            value = jsonNode.get(key);
-            if (ObjectUtils.isEmpty(value) && parameterAnnotation.required()) {
-                throw new IllegalAccessException(String.format("required param %s is not present", key));
-            }
-        } else {
-            key = parameter.getParameterName();
-            value = jsonNode.get(key);
-        }
-
-        Class<?> paramType = parameter.getParameterType();
-        Type type = Type.getType(paramType);
-        if (null != value) {
-
-            // 基本数据类型
-            if (paramType.isPrimitive()) {
-                switch (type.getSort()) {
-                    case Type.BOOLEAN:
-                        return Boolean.valueOf(value.toString());
-                    case Type.BYTE:
-                        return Byte.valueOf(value.toString());
-                    case Type.CHAR:
-                        return value.toString().charAt(0);
-                    case Type.SHORT:
-                        return Short.valueOf(value.toString());
-                    case Type.INT:
-                        return Integer.valueOf(value.toString());
-                    case Type.FLOAT:
-                        return Float.valueOf(value.toString());
-                    case Type.LONG:
-                        return Long.valueOf(value.toString());
-                    case Type.DOUBLE:
-                        return Double.valueOf(value.toString());
-                    case Type.ARRAY:
-                        return value;
-                }
-            }
-
-            System.out.println(paramType.getName());
-            System.out.println(paramType.getTypeName());
-            // 基本数据类型包装类
-            Number number;
-            if (isBasicDataTypes(paramType)) {
-                switch (paramType.getTypeName()) {
-                    case "java.lang.Boolean":
-                        return Boolean.valueOf(value.toString());
-                    case "java.lang.Byte":
-                        return Byte.valueOf(value.toString());
-                    case "java.lang.Character":
-                        return value.toString().charAt(0);
-                    case "java.lang.Short":
-                        return Short.valueOf(value.toString());
-                    case "java.lang.Integer":
-                        return Integer.valueOf(value.toString());
-                    case "java.lang.Float":
-                        return Float.valueOf(value.toString());
-                    case "java.lang.Long":
-                        return Long.valueOf(value.toString());
-                    case "java.lang.Double":
-                        return Double.valueOf(value.toString());
-                }
-            }/* else if (paramType == String.class) {
-
-            }*/
-        }
-        return Class.forName(paramType.getName()).newInstance();
+        return result;
     }
 
     /**
@@ -181,127 +190,4 @@ public class MultiRequestBodyResolver implements HandlerMethodArgumentResolver {
         return classSet.contains(clazz);
     }
 
-//    {
-//        int n = methods.size();
-//        String[] methodNames = new String[n];
-//        Class[][] parameterTypes = new Class[n][];
-//        Class[] returnTypes = new Class[n];
-//        for (int i = 0; i < n; i++) {
-//            Method method = methods.get(i);
-//            methodNames[i] = method.getName();
-//            parameterTypes[i] = method.getParameterTypes();
-//            returnTypes[i] = method.getReturnType();
-//        }
-//
-//        String className = type.getName();
-//        String accessClassName = className + "MethodAccess";
-//        if (accessClassName.startsWith("java.")) accessClassName = "reflectasm." + accessClassName;
-//        Class accessClass;
-//
-//        AccessClassLoader loader = AccessClassLoader.get(type);
-//        synchronized (loader) {
-//            try {
-//                accessClass = loader.loadClass(accessClassName);
-//            } catch (ClassNotFoundException ignored) {
-//                String accessClassNameInternal = accessClassName.replace('.', '/');
-//                String classNameInternal = className.replace('.', '/');
-//
-//                ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-//                MethodVisitor mv;
-//                cw.visit(V1_1, ACC_PUBLIC + ACC_SUPER, accessClassNameInternal, null, "com/esotericsoftware/reflectasm/MethodAccess",
-//                        null);
-//                {
-//                    mv = cw.visitMethod(ACC_PUBLIC, "<init>", "()V", null, null);
-//                    mv.visitCode();
-//                    mv.visitVarInsn(ALOAD, 0);
-//                    mv.visitMethodInsn(INVOKESPECIAL, "com/esotericsoftware/reflectasm/MethodAccess", "<init>", "()V");
-//                    mv.visitInsn(RETURN);
-//                    mv.visitMaxs(0, 0);
-//                    mv.visitEnd();
-//                }
-//                {
-//                    mv = cw.visitMethod(ACC_PUBLIC + ACC_VARARGS, "invoke",
-//                            "(Ljava/lang/Object;I[Ljava/lang/Object;)Ljava/lang/Object;", null, null);
-//                    mv.visitCode();
-//
-//                    if (!methods.isEmpty()) {
-//                        mv.visitVarInsn(ALOAD, 1);
-//                        mv.visitTypeInsn(CHECKCAST, classNameInternal);
-//                        mv.visitVarInsn(ASTORE, 4);
-//
-//                        mv.visitVarInsn(ILOAD, 2);
-//                        Label[] labels = new Label[n];
-//                        for (int i = 0; i < n; i++)
-//                            labels[i] = new Label();
-//                        Label defaultLabel = new Label();
-//                        mv.visitTableSwitchInsn(0, labels.length - 1, defaultLabel, labels);
-//
-//                        StringBuilder buffer = new StringBuilder(128);
-//                        for (int i = 0; i < n; i++) {
-//                            mv.visitLabel(labels[i]);
-//                            if (i == 0)
-//                                mv.visitFrame(Opcodes.F_APPEND, 1, new Object[] {classNameInternal}, 0, null);
-//                            else
-//                                mv.visitFrame(Opcodes.F_SAME, 0, null, 0, null);
-//                            mv.visitVarInsn(ALOAD, 4);
-//
-//                            buffer.setLength(0);
-//                            buffer.append('(');
-//
-//                            Class[] paramTypes = parameterTypes[i];
-//                            Class returnType = returnTypes[i];
-//                            for (int paramIndex = 0; paramIndex < paramTypes.length; paramIndex++) {
-//                                mv.visitVarInsn(ALOAD, 3);
-//                                mv.visitIntInsn(BIPUSH, paramIndex);
-//                                mv.visitInsn(AALOAD);
-//                                Type paramType = Type.getType(paramTypes[paramIndex]);
-//
-//
-//                            buffer.append(')');
-//                            buffer.append(Type.getDescriptor(returnType));
-//                            int invoke;
-//                            if (isInterface)
-//                                invoke = INVOKEINTERFACE;
-//                            else if (Modifier.isStatic(methods.get(i).getModifiers()))
-//                                invoke = INVOKESTATIC;
-//                            else
-//                                invoke = INVOKEVIRTUAL;
-//                            mv.visitMethodInsn(invoke, classNameInternal, methodNames[i], buffer.toString());
-//
-//
-//                            mv.visitInsn(ARETURN);
-//                        }
-//
-//                        mv.visitLabel(defaultLabel);
-//                        mv.visitFrame(Opcodes.F_SAME, 0, null, 0, null);
-//                    }
-//                    mv.visitTypeInsn(NEW, "java/lang/IllegalArgumentException");
-//                    mv.visitInsn(DUP);
-//                    mv.visitTypeInsn(NEW, "java/lang/StringBuilder");
-//                    mv.visitInsn(DUP);
-//                    mv.visitLdcInsn("Method not found: ");
-//                    mv.visitMethodInsn(INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "(Ljava/lang/String;)V");
-//                    mv.visitVarInsn(ILOAD, 2);
-//                    mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(I)Ljava/lang/StringBuilder;");
-//                    mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;");
-//                    mv.visitMethodInsn(INVOKESPECIAL, "java/lang/IllegalArgumentException", "<init>", "(Ljava/lang/String;)V");
-//                    mv.visitInsn(ATHROW);
-//                    mv.visitMaxs(0, 0);
-//                    mv.visitEnd();
-//                }
-//                cw.visitEnd();
-//                byte[] data = cw.toByteArray();
-//                accessClass = loader.defineClass(accessClassName, data);
-//            }
-//        }
-//        try {
-//            MethodAccess access = (MethodAccess)accessClass.newInstance();
-//            access.methodNames = methodNames;
-//            access.parameterTypes = parameterTypes;
-//            access.returnTypes = returnTypes;
-//            return access;
-//        } catch (Throwable t) {
-//            throw new RuntimeException("Error constructing method access class: " + accessClassName, t);
-//        }
-//    }
 }

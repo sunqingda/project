@@ -13,12 +13,29 @@ import java.util.List;
 @AllArgsConstructor
 public class Pojo {
 
-    private Long id;
+    private int basicInt;
 
-    private Long _IDD;
+    private short basicShort;
 
-    private String name;
+    private char basicChar;
 
-    private List<Integer> ids;
+    private long basicLong;
+
+    private double basicDouble;
+
+    private float basicFloat;
+
+    private boolean basicBoolean;
+
+    private Integer packInteger;
+
+    private Boolean packBoolean;
+
+    private String str;
+
+    private Object obj;
+
+    private List<Integer> integerList;
+
 
 }
